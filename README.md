@@ -10,8 +10,10 @@ This GitHub page is designed to provide additional material and information for 
 
 1) **R code** used to create the classification ()
 
-2) **Interactive Map** of the classification ()
-https://nouhalmahrouqi.shinyapps.io/LTOAC/
+
+2) **Interactive Map** of the classification (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/tree/main/Shiny_App)
+Available at: https://nouhalmahrouqi.shinyapps.io/LTOAC/
+  
 
 3) **Shapefile** of the output classification (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/tree/main/Shp)
 
