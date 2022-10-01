@@ -8,7 +8,7 @@ All material contain National Statistics data © Crown copyright and database ri
 
 This GitHub page is designed to provide additional material and information for the developed classification. The following resources are available:
 
-1) **R code** used to create the classification ()
+1) **R code** used to create the classification (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/tree/main/Clustering%20Process)
 
 
 2) **Interactive Map** of the classification (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/tree/main/Shiny_App)
