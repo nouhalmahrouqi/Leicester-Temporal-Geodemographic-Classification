@@ -1,0 +1,1499 @@
+---
+title: "Classification Document"
+author: "Nouh"
+date: "17/09/2022"
+output: html_document
+---
+
+This document contains public sector information licensed under the Open Government Licence
+v3.0 from the Office for National Statistics.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Loading the libraries
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(knitr)
+library(sf)
+library(tmap)
+library(RColorBrewer)
+library(systemfonts)
+library(leaflet.providers)
+library(stars)
+library(spatstat)
+library(magrittr)
+library(rgdal)
+library(mapview)
+library(janitor)
+library(pastecs)
+library(corrplot)
+library(psych)
+library(Hmisc)
+library(plotly)
+
+
+
+mapviewOptions(fgb = FALSE, georaster = FALSE)
+
+```
+
+
+## Loading the data
+
+First, the converted data for 1991 and 2001 are loaded along with the raw census data for 2011.
+
+The raw census data for 1991 and 2001 were obtained in Enumeration Districts (ED) and 2001 Output Areas (OA) respectively; then, GeoConvert tool [GeoConvert tool](https://geoconvert.ukdataservice.ac.uk/index.html) was used from the ONS website to convert the geographies of those two census into 2011 OA.
+
+The converted data was then loaded to R environment. In the below chunk, it will be noticed that there are 3 csv files for 1991 and 2001. The reason for that is because GeoConvert does not accept files with more than 50 column; therefore, the data conversion was split into 3 files to fit with the maximum acceptable number of column in the tool. 
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 15}
+
+
+## Loading the converted data for 1991:
+# csv file 2:
+Var2_1991_OA11 <-
+  readr::read_csv("/home/nmkam1/Dissertation/Data/Converted_Data/1991_2ED.csv")
+
+# csv file 3:
+Var3_1991_OA11 <-
+  readr::read_csv("/home/nmkam1/Dissertation/Data/Converted_Data/1991_3ED.csv")
+
+# csv file 1:
+Var1_1991_OA11 <-
+  readr::read_csv("/home/nmkam1/Dissertation/Data/Converted_Data/1991_1ED.csv") %>%
+  # joining the other csv files (csv2 & csv3)
+  dplyr::left_join(Var2_1991_OA11, by = c("2011 census output areas and small areas (2001 codes used in scotland)" = "2011 census output areas and small areas (2001 codes used in scotland)")) %>%
+  dplyr::left_join(Var3_1991_OA11, by = c("2011 census output areas and small areas (2001 codes used in scotland)" = "2011 census output areas and small areas (2001 codes used in scotland)"))
+
+## Reading 2011_OA shapefile for Leicester LAD, Oably and Wigston LAD:
+Var_1991_OA11 <- st_read("/home/nmkam1/Dissertation/Data/2011/2011_Leic_Oably.shp") %>%
+  dplyr::select(code) %>% # selecting the code column only
+  # joining with the 1991 converted data
+  dplyr::left_join(Var1_1991_OA11, by = c(code = "2011 census output areas and small areas (2001 codes used in scotland)")) %>%
+  # Removing OA that have less than 30 residents
+  dplyr::filter(total_population >= 30)
+
+
+
+
+## Loading the converted data for 2001:
+# csv file 2:
+Var2_2001_OA11 <-
+  readr::read_csv("/home/nmkam1/Dissertation/Data/Converted_Data/2001_2OA.csv")
+
+# csv file 3:
+Var3_2001_OA11 <-
+  readr::read_csv("/home/nmkam1/Dissertation/Data/Converted_Data/2001_3OA.csv")
+
+# csv file 1:
+Var1_2001_OA11 <-
+  readr::read_csv("/home/nmkam1/Dissertation/Data/Converted_Data/2001_1OA.csv") %>%
+  dplyr::left_join(Var2_2001_OA11, by = c("2011 census output areas and small areas (2001 codes used in scotland)" = "2011 census output areas and small areas (2001 codes used in scotland)")) %>%
+  dplyr::left_join(Var3_2001_OA11, by = c("2011 census output areas and small areas (2001 codes used in scotland)" = "2011 census output areas and small areas (2001 codes used in scotland)"))
+
+## Reading 2011_OA shapefile:
+Var_2001_OA11 <- st_read("/home/nmkam1/Dissertation/Data/2011/2011_Leic_Oably.shp") %>%
+  dplyr::select(code) %>%
+  # joining with the 2001 converted data
+  dplyr::left_join(Var1_2001_OA11, by = c(code = "2011 census output areas and small areas (2001 codes used in scotland)")) %>%
+  # Removing OA that have less than 30 residents
+  dplyr::filter(total_population >= 30)
+
+
+
+
+## Loading the raw data for 2011:
+Variables_2011 <-
+  readr::read_csv("/home/nmkam1/Dissertation/Data/2011/2011_variables.csv") %>%
+  clean_names()   # clean the column names
+
+## Reading 2011_OA shapefile:
+OA_2011 <- st_read("/home/nmkam1/Dissertation/Data/2011/2011_Leic_Oably.shp") %>%
+  # joining with the census data
+  dplyr::left_join(Variables_2011, by = c("code" = "x2011oa"))
+
+
+```
+
+
+## Initial variables wrangling:
+
+In this step, data wrangling processes are carried out. Some variables are combined together to maintain consistent definitions between the three censuses. Refer back to the methodology chapter in the dissertation to find out how variables from each census are aggregated into wider categories to match them.
+
+#### 1991
+First, 1991 variables:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 5}
+
+select_var_1991 <- Var_1991_OA11 %>%
+  dplyr::mutate("0_to_14_children" = age_0_to_4 + age_5_to_9 + age_10_to_14) %>%
+  dplyr::mutate("15_to_29_young_adults" = age_15_to_19 + age_20_to_24 + age_25_to_29) %>%
+  dplyr::rename("30_to_44_adults" =  age_30_to_44) %>%
+  dplyr::mutate("45_to_64_middle_aged" = age_45_to_59 + age_60_to_64) %>%
+  dplyr::mutate("65+_elderly_and_the_aged" = age_65_to_74 + age_75_to_84 + age_85_to_89 + age_90_and_over) %>%
+  dplyr::mutate(black = black_caribbean + black_african + black_other) %>%
+  dplyr::rename(migrants_from_outside_the_uk = from_outside_great_britain) %>%
+  dplyr::rename(people_with_limiting_long_term_illness = limiting_long_term_illness_in_households) %>%
+  dplyr::mutate(first_or_higher_degree_professional_qualifications = level_a_higher_degree + level_b_degree) %>%
+  dplyr::rename(diploma_HNC_HND_etc = level_c_diploma_etc) %>%
+  dplyr::rename(owned_accommodation = owner_occupied) %>%
+  dplyr::mutate(private_rent = rented_privately + rented_with_a_job_or_business) %>%
+  dplyr::mutate(social_rent = rented_from_a_housing_association + rented_from_a_local_authority_or_new_town) %>%
+  dplyr::rename(detached_dwelling = unshared_dwellings_detached) %>%
+  dplyr::rename(semi_detached_dwelling = unshared_dwellings_semi_detached) %>%
+  dplyr::rename(terraced_dwelling = unshared_dwellings_terraced) %>%
+  dplyr::mutate(flats = unshared_dwellings_flat_in_residential_building + unshared_dwellings_flat_in_commercial_building) %>%
+  dplyr::mutate(part_of_converted_or_shared_house = unshared_dwellings_converted_flat + unshared_dwellings_converted_flatlet + unshared_dwellings_not_self_contained + unshared_dwellings_not_self_contained_rooms + unshared_dwellings_bedsit) %>%
+  dplyr::rename(employed = economically_active_employees_full_time_part_time_self_employed) %>%
+  dplyr::rename(unemployed = economically_active_unemployed) %>%
+  dplyr::rename(retired = economically_inactive_retired) %>%
+  dplyr::mutate(managerial_and_professional = x1_managers_and_administrators + x2_professional_occupations) %>%
+  dplyr::mutate(skilled_non_manual = x3_associate_professional_and_technical_occupations + x4_clerical_and_secretarial_occupations) %>%
+  dplyr::rename(skilled_manual = x5_craft_and_related_occupations) %>%
+  dplyr::mutate(partly_skilled = x6_personal_and_protective_services_occupations + x7_sales_occupations + x8_plant_and_machine_operatives + x9_other_occupations) %>%
+  dplyr::mutate(use_public_transport = br_train + other_rail + bus) %>%
+  dplyr::mutate(use_private_car_or_trans = car_driver + car_passenger + motorcycle) %>%
+  dplyr::mutate(use_non_motorized_trans = pedal_cycle + on_foot) %>%
+  dplyr::mutate(mining_and_manufacturing = mining + manufacturing_metal_etc + other_manufacturing) %>%
+  dplyr::rename(education_health_real_estate_defence_and_others = other_services) %>%
+  dplyr::rename(higher_and_professional_occupations = i_professional_etc_occupations) %>%
+  dplyr::mutate(skilled_occupations_non_manual = ii_managerial_and_technical + iii_n_skilled_occupations_non_manual) %>%
+  dplyr::rename(skilled_occupations_manual = iii_m_skilled_occupations_manual) %>%
+  dplyr::mutate(lowest_grade_occupations = iv_partly_skilled_occupations + v_unskilled_occupations + on_a_government_scheme) %>%
+  dplyr::mutate(uk_and_ireland = uk + irish_republic) %>%
+  dplyr::mutate(europe = other_european_community + other_europe) %>%
+  dplyr::mutate(bangladesh_india_and_pakistan = bangladesh + india + pakistan) %>%
+  dplyr::mutate(africa = eastern_africa + other_africa) %>%
+  dplyr::mutate(caribbean = caribbean) %>%
+  
+  # selecting the required variables only, and maintaining their order:
+  dplyr::select(code, total_population, total_households, total_dwellings, total_household_spaces, all_occupied_household_spaces, total_population_16_and_over, total_population_16_to_74, x10_percent_sample_occu_indus, x10_percent_sample_qualified_manpower, x10_percent_sample_social_class, "0_to_14_children", "15_to_29_young_adults", "30_to_44_adults", "45_to_64_middle_aged", "65+_elderly_and_the_aged", single_widowed_or_divorced, married, total_lone_parents, households_with_no_dependent_children, households_with_dependant_children, white, black, indian, pakistani, bangladeshi, chinese, migrants_from_the_uk, migrants_from_outside_the_uk, uk_and_ireland, europe, africa, caribbean, bangladesh_india_and_pakistan, china, employed, unemployed, retired, managerial_and_professional, skilled_non_manual, skilled_manual, partly_skilled, agricultural_forestry_and_fishing, energy_and_water_supply, mining_and_manufacturing, construction, distribution_hotels_and_catering_repairs, transport_and_communications, banking_and_finance_etc, education_health_real_estate_defence_and_others, first_or_higher_degree_professional_qualifications, diploma_HNC_HND_etc, total_students, households_with_no_car, households_with_2_or_more_cars, use_public_transport, use_private_car_or_trans, use_non_motorized_trans,  people_with_limiting_long_term_illness, owned_accommodation, private_rent, social_rent, detached_dwelling, semi_detached_dwelling, terraced_dwelling, flats, part_of_converted_or_shared_house, shared_dwellings, no_central_heating,  households_with_7_or_more_rooms, over_1_5_persons_per_room)
+
+
+
+```
+
+
+### 2001
+Second, 2001 variables:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 5}
+
+select_var_2001 <- Var_2001_OA11 %>%
+  dplyr::mutate("0_to_14_children" = age_0_to_4 + age_5_to_9 + age_10_to_14) %>%
+  dplyr::mutate("15_to_29_young_adults" = age_15_to_19 + age_20_to_24 + age_25_to_29) %>%
+  dplyr::rename("30_to_44_adults" =  age_30_to_44) %>%
+  dplyr::mutate("45_to_64_middle_aged" = age_45_to_59 + age_60_to_64) %>%
+  dplyr::mutate("65+_elderly_and_the_aged" = age_65_to_74 + age_75_to_84 + age_85_to_89 + age_90_and_over) %>%
+  dplyr::mutate(single_widowed_or_divorced = single_never_married + divorced + widowed) %>%
+  dplyr::mutate(married = married_first_marriage + re_married + separated_but_still_legally_married) %>%
+  dplyr::rename(total_lone_parents = one_family_and_no_others_lone_parent_households) %>%
+  dplyr::rename(c(black_caribbean = black_black_british_black_caribbean, black_african = black_black_british_black_african, black_other = black_black_british_other)) %>%
+  dplyr::mutate(black = black_caribbean + black_african + black_other) %>%
+  dplyr::rename(c(indian = asian_asian_british_indian, pakistani = asian_asian_british_pakistani, bangladeshi = asian_asian_british_bangladeshi)) %>%
+  dplyr::rename(chinese = chinese_other_chinese) %>%
+  dplyr::rename(c(migrants_from_the_uk = moved_into_the_area_from_within_the_uk, migrants_from_outside_the_uk = moved_into_the_area_from_outside_the_uk)) %>%
+  dplyr::rename(people_with_limiting_long_term_illness = people_with_limiting_long_term_illness) %>%
+  dplyr::mutate(total_students = schoolchildren_and_full_time_students_age_16_to_17 + schoolchildren_and_full_time_students_age_18_to_74 + full_time_students_age_18_to_74_economically_active_in_employment + full_time_students_age_18_to_74_economically_active_unemployed + full_time_students_age_18_to_74_economically_inactive) %>%
+  dplyr::rename(c(first_or_higher_degree_professional_qualifications = highest_level_of_qualification_level_4_qualifications_and_above, diploma_HNC_HND_etc = highest_level_of_qualification_level_3_qualifications)) %>%
+  dplyr::mutate(owned_accommodation = owned_outright + owned_with_a_mortgage_or_loan + shared_ownership) %>%
+  dplyr::rename(private_rent = rented_from_a_private_landlord_or_letting_agency) %>%
+  dplyr::mutate(social_rent = rented_from_council_local_authority + rented_from_a_housing_association_registered_social_landlord) %>%
+  dplyr::rename(c(households_with_no_car = no_cars_or_vans_in_household, households_with_1_car = x1_car_or_van_in_household)) %>%
+  dplyr::mutate(households_with_2_or_more_cars = x2_cars_or_vans_in_household + x3_cars_or_vans_in_household + x4_or_more_cars_or_vans_in_household) %>%
+  dplyr::mutate(households_with_no_dependent_children = one_family_and_no_others_married_couple_households_no_children +  one_family_and_no_others_married_couple_households_all_children_non_dependent + one_family_and_no_others_cohabiting_couple_households_no_children + one_family_and_no_others_cohabiting_couple_households_all_children_non_dependent + one_family_and_no_others_lone_parent_households_all_children_non_dependent) %>%
+  dplyr::mutate(households_with_dependant_children = one_family_and_no_others_married_couple_households_with_dependent_children + one_family_and_no_others_cohabiting_couple_households_with_dependent_children + one_family_and_no_others_lone_parent_households_with_dependent_children + other_households_with_dependent_children) %>%
+  dplyr::rename(c(no_central_heating = without_central_heating, over_1_5_persons_per_room = over_1_5_persons_per_room)) %>%
+  dplyr::rename(detached_dwelling = unshared_dwelling_whole_house_or_bungalow_detached) %>%
+  dplyr::rename(semi_detached_dwelling = unshared_dwelling_whole_house_or_bungalow_semi_detached) %>%
+  dplyr::rename(terraced_dwelling = unshared_dwelling_whole_house_or_bungalow_terraced_including_end_terrace) %>%
+  dplyr::mutate(flats = unshared_dwelling_flat_maisonette_or_apartment_purpose_built_block_of_flats_or_tenement + unshared_dwelling_flat_maisonette_or_apartment_in_commercial_building) %>%
+  dplyr::rename(part_of_converted_or_shared_house = unshared_dwelling_flat_maisonette_or_apartment_part_of_a_converted_or_shared_house_including_bed_sits) %>%
+  dplyr::rename(shared_dwellings = shared_dwelling) %>%
+  dplyr::rename(employed = economically_active_in_employment) %>%
+  dplyr::rename(unemployed = economically_active_unemployed) %>%
+  dplyr::rename(retired = economically_inactive_retired) %>%
+  dplyr::mutate(managerial_and_professional = x1_managers_and_senior_officials + x2_professional_occupations) %>%
+  dplyr::mutate(skilled_non_manual = x3_associate_professional_and_technical_occupations + x4_administrative_and_secretarial_occupations) %>%
+  dplyr::rename(skilled_manual = x5_skilled_trades_occupations) %>%
+  dplyr::mutate(partly_skilled = x6_personal_service_occupations + x7_sales_and_customer_service_occupations + x8_process_plant_and_machine_operatives + x9_elementary_occupations) %>%
+  dplyr::mutate(use_public_transport = underground_metro_light_rail_tram + train + bus_minibus_or_coach) %>%
+  dplyr::mutate(use_private_car_or_trans = driving_a_car_or_van + passenger_in_a_car_or_van + taxi_or_minicab + motorcycle_scooter_or_moped) %>%
+  dplyr::mutate(use_non_motorized_trans = bicycle + on_foot) %>%
+  dplyr::mutate(agricultural_forestry_and_fishing = a_agriculture_hunting_forestry + b_fishing) %>%
+  dplyr::rename(energy_and_water_supply = e_electricity_gas_and_water_supply) %>%
+  dplyr::mutate(mining_and_manufacturing = c_mining_and_quarrying + d_manufacturing) %>%
+  dplyr::rename(construction = f_constructiion) %>%
+  dplyr::mutate(distribution_hotels_and_catering_repairs = g_wholesale_and_retail_trade_repair_of_motor_vehicles + h_hotels_and_restaurants) %>%
+  dplyr::rename(c(transport_and_communications = i_transport_storage_and_communications, banking_and_finance_etc = j_financial_intermediation)) %>%
+  dplyr::mutate(education_health_real_estate_defence_and_others = k_real_estate_renting_and_business_activities + l_public_administration_and_defence_social_security + m_education + n_health_and_social_work + o_p_q_other) %>%
+  dplyr::rename(higher_and_professional_occupations = ab_higher_and_intermediate_managerial_administrative_professional_occupations) %>%
+  dplyr::rename(skilled_occupations_non_manual = c1_supervisory_clerical_and_junior_managerial_administrative_professional_occupations) %>%
+  dplyr::rename(skilled_occupations_manual = c2_skilled_manual_occupations) %>%
+  dplyr::mutate(lowest_grade_occupations = d_semi_skilled_and_unskilled_manual_occupations + e_on_state_benefit_unemployed_and_lowest_grade_occupations) %>%
+  dplyr::mutate(uk_and_ireland = united_kingdom + republic_of_ireland + channel_islands) %>%
+  dplyr::mutate(europe = other_western_europe + non_eu_countries_in_western_europe + eastern_europe + eu_countries) %>%
+  dplyr::mutate(bangladesh_india_and_pakistan = bangladesh + india + pakistan) %>%
+  dplyr::mutate(africa = nigeria + sierra_leone + other_central_and_western_africa + kenya + zimbabwe + other_south_and_eastern_africa) %>%
+  dplyr::mutate(caribbean = jamaica + other_caribbean_and_west_indies) %>%
+  
+  # selecting the required variables only, and maintaining their order: 
+  dplyr::select(code, total_population, total_households, total_dwellings, all_occupied_household_spaces, total_population_16_and_over, total_population_16_to_74, total_employment_16_to_74, "0_to_14_children", "15_to_29_young_adults", "30_to_44_adults", "45_to_64_middle_aged", "65+_elderly_and_the_aged", single_widowed_or_divorced, married, total_lone_parents, households_with_no_dependent_children, households_with_dependant_children, white, black, indian, pakistani, bangladeshi, chinese, migrants_from_the_uk, migrants_from_outside_the_uk, uk_and_ireland, europe, africa, caribbean, bangladesh_india_and_pakistan, china, employed, unemployed, retired, managerial_and_professional, skilled_non_manual, skilled_manual, partly_skilled, agricultural_forestry_and_fishing, energy_and_water_supply, mining_and_manufacturing, construction, distribution_hotels_and_catering_repairs, transport_and_communications, banking_and_finance_etc, education_health_real_estate_defence_and_others, first_or_higher_degree_professional_qualifications, diploma_HNC_HND_etc, total_students, households_with_no_car, households_with_2_or_more_cars, use_public_transport, use_private_car_or_trans, use_non_motorized_trans,  people_with_limiting_long_term_illness, owned_accommodation, private_rent, social_rent, detached_dwelling, semi_detached_dwelling, terraced_dwelling, flats, part_of_converted_or_shared_house, shared_dwellings, no_central_heating,  households_with_7_or_more_rooms, over_1_5_persons_per_room)
+
+
+```
+
+
+### 2011
+Third, 2011 variables:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 5}
+
+select_var_2011 <- OA_2011 %>%
+  dplyr::mutate("0_to_14_children" = age_0_to_4 + age_5_to_9 + age_10_to_14) %>%
+  dplyr::mutate("15_to_29_young_adults" = age_15_to_19 + age_20_to_24 + age_25_to_29) %>%
+  dplyr::rename("30_to_44_adults" =  age_30_to_44) %>%
+  dplyr::mutate("45_to_64_middle_aged" = age_45_to_59 + age_60_to_64) %>%
+  dplyr::mutate("65+_elderly_and_the_aged" = age_65_to_74 + age_75_to_84 + age_85_to_89 + age_90_and_over) %>%
+  dplyr::mutate(single_widowed_or_divorced = single_never_married_or_never_registered_a_same_sex_civil_partnership + divorced_or_formerly_in_a_same_sex_civil_partnership_which_is_now_legally_dissolved + widowed_or_surviving_partner_from_a_same_sex_civil_partnership) %>%
+  dplyr::mutate(married = married + in_a_registered_same_sex_civil_partnership + separated_but_still_legally_married_or_still_legally_in_a_same_sex_civil_partnership) %>%
+  dplyr::rename(total_lone_parents = one_family_only_lone_parent_total) %>%
+  dplyr::rename(c(black_caribbean = black_african_caribbean_black_british_caribbean, black_african = black_african_caribbean_black_british_african, black_other = black_african_caribbean_black_british_other_black)) %>%
+  dplyr::mutate(black = black_caribbean + black_african + black_other) %>%
+  dplyr::rename(c(indian = asian_asian_british_indian, pakistani = asian_asian_british_pakistani, bangladeshi = asian_asian_british_bangladeshi)) %>%
+  dplyr::rename(chinese = asian_asian_british_chinese) %>%
+  dplyr::rename(c(migrants_from_the_uk = migrants_moved_into_the_area_from_within_the_uk, migrants_from_outside_the_uk = migrants_moved_into_the_area_from_outside_the_uk)) %>%
+  dplyr::mutate(people_with_limiting_long_term_illness = day_to_day_activities_limited_a_lot + day_to_day_activities_limited_a_little) %>%
+  dplyr::mutate(total_students = schoolchildren_and_full_time_students_age_16_to_17 + schoolchildren_and_full_time_students_age_18_and_over + full_time_students_age_18_to_74_economically_active_in_employment + full_time_students_age_18_to_74_economically_active_unemployed + full_time_students_age_18_to_74_economically_inactive) %>%
+  dplyr::rename(c(first_or_higher_degree_professional_qualifications = highest_level_of_qualification_level_4_qualifications_and_above, diploma_HNC_HND_etc = highest_level_of_qualification_level_3_qualifications)) %>%
+  dplyr::mutate(owned_accommodation = owned + shared_ownership_part_owned_and_part_rented) %>%
+  dplyr::rename(c(private_rent = private_rented, social_rent = social_rented)) %>%
+  dplyr::rename(c(households_with_no_car = no_cars_or_vans_in_household, households_with_1_car = x1_car_or_van_in_household)) %>%
+  dplyr::mutate(households_with_2_or_more_cars = x2_cars_or_vans_in_household + x3_cars_or_vans_in_household + x4_or_more_cars_or_vans_in_household) %>%
+  dplyr::mutate(households_with_no_dependent_children = one_family_only_married_or_same_sex_civil_partnership_couple_no_children +  one_family_only_married_or_same_sex_civil_partnership_couple_all_children_non_dependent + one_family_only_cohabiting_couple_no_children + one_family_only_cohabiting_couple_all_children_non_dependent + one_family_only_lone_parent_all_children_non_dependent) %>%
+  dplyr::mutate(households_with_dependant_children = one_family_only_married_or_same_sex_civil_partnership_couple_dependent_children + one_family_only_cohabiting_couple_dependent_children + one_family_only_lone_parent_dependent_children + other_household_types_with_dependent_children) %>%
+  dplyr::rename(c(no_central_heating = no_central_heating, over_1_5_persons_per_room = over_1_5_persons_per_room)) %>%
+  dplyr::rename(detached_dwelling = whole_house_or_bungalow_detached) %>%
+  dplyr::rename(semi_detached_dwelling = whole_house_or_bungalow_semi_detached) %>%
+  dplyr::rename(terraced_dwelling = whole_house_or_bungalow_terraced_including_end_terrace) %>%
+  dplyr::mutate(flats = flat_maisonette_or_apartment_purpose_built_block_of_flats_or_tenement + flat_maisonette_or_apartment_in_a_commercial_building) %>%
+  dplyr::rename(part_of_converted_or_shared_house = flat_maisonette_or_apartment_part_of_a_converted_or_shared_house_including_bed_sits) %>%
+  dplyr::mutate(shared_dwellings = shared_dwelling_two_household_spaces + shared_dwelling_three_or_more_household_spaces) %>%
+  dplyr::rename(employed = economically_active_in_employment) %>%
+  dplyr::rename(unemployed = economically_active_unemployed) %>%
+  dplyr::rename(retired = economically_inactive_retired) %>%
+  dplyr::mutate(managerial_and_professional = x1_managers_directors_and_senior_officials + x2_professional_occupations) %>%
+  dplyr::mutate(skilled_non_manual = x3_associate_professional_and_technical_occupations + x4_administrative_and_secretarial_occupations) %>%
+  dplyr::rename(skilled_manual = x5_skilled_trades_occupations) %>%
+  dplyr::mutate(partly_skilled = x6_caring_leisure_and_other_service_occupations + x7_sales_and_customer_service_occupations + x8_process_plant_and_machine_operatives + x9_elementary_occupations) %>%
+  dplyr::mutate(use_public_transport = underground_metro_light_rail_tram + train + bus_minibus_or_coach) %>%
+  dplyr::mutate(use_private_car_or_trans = driving_a_car_or_van + passenger_in_a_car_or_van + taxi + motorcycle_scooter_or_moped) %>%
+  dplyr::mutate(use_non_motorized_trans = bicycle + on_foot) %>%
+  dplyr::rename(agricultural_forestry_and_fishing = a_agriculture_forestry_and_fishing) %>%
+  dplyr::mutate(energy_and_water_supply = d_electricity_gas_steam_and_air_conditioning_supply + e_water_supply_sewerage_waste_management_and_remediation_activities) %>%
+  dplyr::mutate(mining_and_manufacturing = b_mining_and_quarrying + c_manufacturing) %>%
+  dplyr::rename(construction = f_construction) %>%
+  dplyr::mutate(distribution_hotels_and_catering_repairs = g_wholesale_and_retail_trade_repair_of_motor_vehicles_and_motor_cycles + i_accommodation_and_food_service_activities) %>%
+  dplyr::mutate(transport_and_communications = h_transport_and_storage + j_information_and_communication) %>%
+  dplyr::rename(banking_and_finance_etc = k_financial_and_insurance_activities) %>%
+  dplyr::mutate(education_health_real_estate_defence_and_others = l_real_estate_activities + n_administrative_and_support_service_activities + o_public_administration_and_defence_compulsory_social_security + m_professional_scientific_and_technical_activities + p_education + q_human_health_and_social_work_activities + r_s_t_u_other) %>%
+  dplyr::rename(higher_and_professional_occupations = ab_higher_and_intermediate_managerial_administrative_professional_occupations) %>%
+  dplyr::rename(skilled_occupations_non_manual = c1_supervisory_clerical_and_junior_managerial_administrative_professional_occupations) %>%
+  dplyr::rename(skilled_occupations_manual = c2_skilled_manual_occupations) %>%
+  dplyr::rename(lowest_grade_occupations = de_semi_skilled_and_unskilled_manual_occupations_unemployed_and_lowest_grade_occupations) %>%
+  dplyr::mutate(uk_and_ireland = europe_united_kingdom_total + europe_guernsey + europe_jersey + europe_channel_islands_not_otherwise_specified + europe_isle_of_man + europe_ireland) %>%
+  dplyr::rename(europe = europe_other_europe_total) %>%
+  dplyr::mutate(bangladesh_india_and_pakistan = middle_east_and_asia_southern_asia_bangladesh + middle_east_and_asia_southern_asia_india + middle_east_and_asia_southern_asia_pakistan) %>%
+  dplyr::rename(china = middle_east_and_asia_eastern_asia_china) %>%
+  dplyr::mutate(africa = africa_central_and_western_africa_nigeria + other_central_and_western_africa + africa_south_and_eastern_africa_kenya + africa_south_and_eastern_africa_zimbabwe + africa_south_and_eastern_africa_other_south_and_eastern_africa) %>%
+  dplyr::mutate(caribbean = the_americas_and_the_caribbean_the_caribbean_total) %>%
+  
+  # selecting the required variables only, and maintaining their order:
+  dplyr::select(code, total_population, total_households, total_dwellings, total_household_spaces, all_occupied_household_spaces, total_population_16_and_over, total_population_16_to_74, total_employment_16_to_74, total_population_16_to_64, "0_to_14_children", "15_to_29_young_adults", "30_to_44_adults", "45_to_64_middle_aged", "65+_elderly_and_the_aged", single_widowed_or_divorced, married, total_lone_parents, households_with_no_dependent_children, households_with_dependant_children, white, black, indian, pakistani, bangladeshi, chinese, migrants_from_the_uk, migrants_from_outside_the_uk, uk_and_ireland, europe, africa, caribbean, bangladesh_india_and_pakistan, china, employed, unemployed, retired, managerial_and_professional, skilled_non_manual, skilled_manual, partly_skilled, agricultural_forestry_and_fishing, energy_and_water_supply, mining_and_manufacturing, construction, distribution_hotels_and_catering_repairs, transport_and_communications, banking_and_finance_etc, education_health_real_estate_defence_and_others, first_or_higher_degree_professional_qualifications, diploma_HNC_HND_etc, total_students, households_with_no_car, households_with_2_or_more_cars, use_public_transport, use_private_car_or_trans, use_non_motorized_trans,  people_with_limiting_long_term_illness, owned_accommodation, private_rent, social_rent, detached_dwelling, semi_detached_dwelling, terraced_dwelling, flats, part_of_converted_or_shared_house, shared_dwellings, no_central_heating,  households_with_7_or_more_rooms, over_1_5_persons_per_room)
+
+
+```
+
+
+## Normalisation (Rate calculation):
+### percentages
+In this step, the variables are normalised within the range of 0 to 100.
+
+#### 1991
+Converting the variables into percentage with their corresponded Variable Statistical Unit:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 5}
+
+perc_var_1991 <- select_var_1991 %>%
+  dplyr::mutate(
+    dplyr::across(
+      c("0_to_14_children":"65+_elderly_and_the_aged", white:china, people_with_limiting_long_term_illness),
+      function(x){ (x / total_population) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c("single_widowed_or_divorced":"total_lone_parents", total_students, employed:retired),
+      function(x){ (x / total_population_16_and_over) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(first_or_higher_degree_professional_qualifications, diploma_HNC_HND_etc),
+      function(x){ (x / x10_percent_sample_qualified_manpower) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(households_with_no_dependent_children, households_with_dependant_children, households_with_no_car:households_with_2_or_more_cars, owned_accommodation:social_rent, no_central_heating:over_1_5_persons_per_room),
+      function(x){ (x / total_households) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+     c(detached_dwelling:shared_dwellings),
+      function(x){ (x / total_dwellings) * 100 } 
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(managerial_and_professional:education_health_real_estate_defence_and_others, use_public_transport:use_non_motorized_trans),
+      function(x){ (x / x10_percent_sample_occu_indus) * 100 } 
+    )
+  )
+
+
+perc_var_1991[is.na(perc_var_1991)] = 0
+
+
+```
+
+
+#### 2001
+Rate calculation for 2001 data:
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 5}
+
+# Converting the variables into percentage with their corresponded Variable Statistical Unit
+perc_var_2001 <- select_var_2001 %>%
+  dplyr::mutate(
+    dplyr::across(
+      c("0_to_14_children":"65+_elderly_and_the_aged", total_lone_parents, white:china, people_with_limiting_long_term_illness),
+      function(x){ (x / total_population) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(single_widowed_or_divorced, married),
+      function(x){ (x / total_population_16_and_over) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(first_or_higher_degree_professional_qualifications:total_students, employed:retired),
+      function(x){ (x / total_population_16_to_74) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(households_with_no_dependent_children, households_with_dependant_children, households_with_no_car:households_with_2_or_more_cars, owned_accommodation:social_rent, over_1_5_persons_per_room),
+      function(x){ (x / total_households) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(no_central_heating, households_with_7_or_more_rooms),
+      function(x){ (x / all_occupied_household_spaces) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+     c(detached_dwelling:shared_dwellings),
+      function(x){ (x / total_dwellings) * 100 } 
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(managerial_and_professional:education_health_real_estate_defence_and_others, use_public_transport:use_non_motorized_trans),
+      function(x){ (x / total_employment_16_to_74) * 100 } 
+    )
+  )
+
+```
+
+
+#### 2011
+Rate calculation for 2011 data:
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 5}
+
+# Converting the variables into percentage with their corresponded Variable Statistical Unit
+perc_var_2011 <- select_var_2011 %>%
+  dplyr::mutate(
+    dplyr::across(
+      c("0_to_14_children":"65+_elderly_and_the_aged", total_lone_parents, white:china, people_with_limiting_long_term_illness),
+      function(x){ (x / total_population) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(single_widowed_or_divorced, married),
+      function(x){ (x / total_population_16_and_over) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(first_or_higher_degree_professional_qualifications:total_students, employed:retired),
+      function(x){ (x / total_population_16_to_74) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(households_with_no_dependent_children, households_with_dependant_children, households_with_no_car:households_with_2_or_more_cars, owned_accommodation:social_rent, over_1_5_persons_per_room),
+      function(x){ (x / total_households) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(no_central_heating, households_with_7_or_more_rooms),
+      function(x){ (x / all_occupied_household_spaces) * 100 }
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+     c(detached_dwelling:shared_dwellings),
+      function(x){ (x / total_dwellings) * 100 } 
+    )
+  ) %>%
+  
+  dplyr::mutate(
+    dplyr::across(
+      c(managerial_and_professional:education_health_real_estate_defence_and_others, use_public_transport:use_non_motorized_trans),
+      function(x){ (x / total_employment_16_to_74) * 100 } 
+    )
+  )
+
+
+
+```
+
+
+## Composite Dataset
+A composite dataset is created to include all variables needed for the classification from the three census.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 5}
+
+# selecting the required columns only:
+var_1991 <- perc_var_1991 %>%
+  st_drop_geometry() %>%
+  dplyr::select(code, "0_to_14_children":over_1_5_persons_per_room) %>%
+  # adding new column to distinguish the years later in the composite dataset
+  dplyr::mutate(year = "1991")
+
+
+var_2001 <- perc_var_2001 %>%
+  st_drop_geometry() %>%
+  dplyr::select(code, "0_to_14_children":over_1_5_persons_per_room) %>%
+  dplyr::mutate(year = "2001")
+
+
+var_2011 <- perc_var_2011 %>%
+  st_drop_geometry() %>%
+  dplyr::select(code, "0_to_14_children":over_1_5_persons_per_room) %>%
+  dplyr::mutate(year = "2011")
+
+
+# merging the three datasets:
+var_all_census <- rbind(var_2011, var_2001, var_1991)
+
+```
+
+
+## Transformation & Distribution:
+ The distributions of the variables are checked in this part using histograms Q-Q plots, and stat.desc function from pastecs library. Then, skewed variables are transformed using the inverse hyperbolic sine (IHS) to reduce the skewness.
+
+### Histograms
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width = 20}
+
+histogram <- var_all_census %>%
+  dplyr::select("code", "0_to_14_children":over_1_5_persons_per_room) %>%
+  tidyr::pivot_longer(!"code",
+                      names_to = "Variable",
+                      values_to = "value"
+                      ) %>%
+  ggplot2::ggplot(
+    aes(
+      x = value, fill = Variable
+    )
+  ) +
+  ggplot2::geom_histogram(binwidth = 1, show.legend = FALSE) +
+  facet_wrap(~Variable %>%
+  factor(levels = c("0_to_14_children", "15_to_29_young_adults", "30_to_44_adults", "45_to_64_middle_aged", "65+_elderly_and_the_aged", "single_widowed_or_divorced", "married", "total_lone_parents", "households_with_no_dependent_children", "households_with_dependant_children", "white", "black", "indian", "pakistani", "bangladeshi", "chinese", "migrants_from_the_uk", "migrants_from_outside_the_uk", "uk_and_ireland", "europe", "africa", "caribbean", "bangladesh_india_and_pakistan", "china", "employed", "unemployed", "retired", "managerial_and_professional", "skilled_non_manual", "skilled_manual", "partly_skilled", "agricultural_forestry_and_fishing", "energy_and_water_supply", "mining_and_manufacturing", "construction", "distribution_hotels_and_catering_repairs", "transport_and_communications", "banking_and_finance_etc", "education_health_real_estate_defence_and_others", "first_or_higher_degree_professional_qualifications", "diploma_HNC_HND_etc", "total_students", "households_with_no_car", "households_with_2_or_more_cars", "use_public_transport", "use_private_car_or_trans", "use_non_motorized_trans",  "people_with_limiting_long_term_illness", "owned_accommodation", "private_rent", "social_rent", "detached_dwelling", "semi_detached_dwelling", "terraced_dwelling", "flats", "part_of_converted_or_shared_house", "shared_dwellings", "no_central_heating",  "households_with_7_or_more_rooms", "over_1_5_persons_per_room"), ordered = T
+         ), scales = "free", ncol = 6) +
+  ggplot2::theme_bw()
+
+histogram
+
+#ggsave("histograms.png", histogram, units = "mm")
+
+
+```
+
+
+### Q-Q plots
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width = 20}
+
+test <- var_all_census %>%
+  dplyr::select("code", "0_to_14_children":over_1_5_persons_per_room) %>%
+  tidyr::pivot_longer(!"code",
+                      names_to = "Variable",
+                      values_to = "value"
+                      )
+
+
+test %>%
+  ggplot(mapping = aes(sample = value)) +
+  facet_wrap(~Variable, scales = "free") +
+  stat_qq() +
+  stat_qq_line()
+
+
+
+
+```
+
+
+### stat_desc
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8}
+
+stat_desc <- var_all_census %>%
+  dplyr::select("0_to_14_children":"over_1_5_persons_per_room") %>%
+  #using stat.desc to generate the descriptive statistics
+  pastecs::stat.desc(norm = TRUE)
+
+
+stat_desc %>%
+  kable(digits = 2)
+
+
+```
+
+
+## Transforming the variables
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width = 20}
+
+IHS_all_census_1 <- var_all_census %>%
+  #selecting the variables
+  dplyr::select("code", "year", "0_to_14_children":"over_1_5_persons_per_room") %>%
+  # using dplyr::across and creating a function to convert the values into log10
+   dplyr::mutate(
+    dplyr::across(
+      c("0_to_14_children":"over_1_5_persons_per_room"),
+      function(x){asinh(x)}
+    ))
+
+
+IHS_all_census <- var_all_census %>%
+  #selecting the variables
+  dplyr::select("code", "year", "0_to_14_children":"over_1_5_persons_per_room") %>%
+  # using dplyr::across and creating a function to convert the values into log10
+   dplyr::mutate(
+    dplyr::across(
+      c("15_to_29_young_adults", total_lone_parents, black:migrants_from_outside_the_uk, europe:china, unemployed, retired, agricultural_forestry_and_fishing, energy_and_water_supply, banking_and_finance_etc, diploma_HNC_HND_etc, total_students, people_with_limiting_long_term_illness, private_rent, detached_dwelling, flats:over_1_5_persons_per_room),
+      function(x){asinh(x)}
+    ))
+
+
+```
+
+
+## Standarisation
+
+### Z-score standardisation
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width = 20}
+
+stand_z_score <- IHS_all_census %>%
+  dplyr::mutate(
+    dplyr::across(
+      c("0_to_14_children":"over_1_5_persons_per_room"),
+      function(x){scale(x, center = T, scale = T)}
+    )
+  )
+
+```
+
+
+
+## Final Variables Selection
+
+### Kendall Correlation
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width = 20}
+
+png("Plot3.png", units = "mm", width = 350, height = 350, res = 300)
+
+corrplot_matrix <- IHS_all_census %>%
+  dplyr::select("0_to_14_children":"over_1_5_persons_per_room") %>%
+  #converting the table into matrix
+  cor(method = "kendall") %>%
+  #plotting the corrplot
+  corrplot::corrplot(method = 'color', addCoef.col = 'black', tl.cex = 0.4,
+          col = COL2('BrBG'), number.cex = 0.3, number.digits = 1, sig.level = 0.01, is.corr = TRUE, number.font = 0.5) %>%
+  corrRect(name = c('0_to_14_children','employed','owned_accommodation','over_1_5_persons_per_room'))%>%
+  corrRect(name = c('0_to_14_children','people_with_limiting_long_term_illness')) %>%
+  corrRect(name = c('0_to_14_children','over_1_5_persons_per_room')) %>%
+  corrRect(name = c('employed','over_1_5_persons_per_room'))
+
+
+dev.off()
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width = 20}
+
+
+corrplot_matrix <- IHS_all_census %>%
+  dplyr::select("0_to_14_children":"over_1_5_persons_per_room") %>%
+  #converting the table into matrix
+  cor(method = "kendall") %>%
+  #plotting the corrplot
+  corrplot::corrplot(method = 'color', addCoef.col = 'black', tl.cex = 0.8,
+          col = COL2('BrBG'), number.cex = 0.6, number.digits = 1, sig.level = 0.01, is.corr = TRUE, number.font = 0.5) %>%
+  corrRect(name = c('0_to_14_children','employed','owned_accommodation','over_1_5_persons_per_room'))%>%
+  corrRect(name = c('0_to_14_children','people_with_limiting_long_term_illness')) %>%
+  corrRect(name = c('0_to_14_children','over_1_5_persons_per_room')) %>%
+  corrRect(name = c('employed','over_1_5_persons_per_room'))
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width = 20}
+
+png("Plot3.png", units = "mm", width = 298, height = 210, res = 300)
+
+corrplot_matrix <- IHS_all_census %>%
+  dplyr::select("0_to_14_children":"chinese") %>%
+  #converting the table into matrix
+  cor(method = "kendall") %>%
+  #plotting the corrplot
+  corrplot::corrplot(method = 'color', addCoef.col = 'black', tl.cex = 1, tl.col = 'black',
+          col = COL2('BrBG'), number.cex = 0.6, number.digits = 1, sig.level = 0.01, is.corr = T, number.font = 0.5) %>%
+  corrRect(name = c('0_to_14_children','single_widowed_or_divorced','white','chinese')) %>%
+  corrRect(name = c('0_to_14_children','households_with_dependant_children')) %>%
+  corrRect(name = c('0_to_14_children','chinese')) %>%
+  corrRect(name = c('single_widowed_or_divorced','chinese'))
+
+dev.off()
+
+```
+
+
+
+
+### Within-Cluster Sum of Squares Analysis (WCSS)
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+set.seed(2011)
+
+stand_z_score <- na.omit(stand_z_score)
+
+
+var_names <-
+  stand_z_score %>%
+  dplyr::select("0_to_14_children":over_1_5_persons_per_room) %>% 
+  colnames()
+
+
+wcss_analysis_first_var <- TRUE
+wcss_analysis <- NA
+
+
+for (i_var in 1:length(var_names)) {
+  
+  i_var_name <- var_names[i_var]
+  cat(i_var_name, "... ")
+  
+  wcss_testing <- c()
+  bcss_testing <- c()
+  
+  for (j in 3:67){
+    
+    cat(j, " ")
+    
+    data_for_wcss_analysis <-
+      stand_z_score %>%
+      slice_sample(prop = 0.01) %>% 
+      select("0_to_14_children":over_1_5_persons_per_room) %>%
+      select(-{{ i_var_name }})
+    
+    j_kmeans <-
+      data_for_wcss_analysis %>% 
+      kmeans(na.omit(j),
+        centers = 10, iter.max = 10000,
+        algorithm = "Lloyd"
+      )
+    
+    wcss_testing <- 
+      c(
+        wcss_testing,
+        j_kmeans %$%
+          tot.withinss
+      )
+    bcss_testing <- 
+      c(
+        bcss_testing,
+        j_kmeans %$%
+          betweenss
+      )
+  
+  }
+  
+  cat("\n")
+  
+  if (wcss_analysis_first_var) {
+    wcss_analysis_first_var <- FALSE
+    wcss_analysis <-
+      tibble(
+        census_variable = i_var_name,
+        wcss = mean(wcss_testing),
+        bcss = mean(bcss_testing)
+      )
+  } else {
+    wcss_analysis <-
+      wcss_analysis %>% 
+      add_row(
+        census_variable = i_var_name,
+        wcss = mean(wcss_testing),
+        bcss = mean(bcss_testing)
+      )
+  }
+}
+
+# Save results
+
+wcss_analysis %>% 
+  saveRDS("/home/nmkam1/Dissertation/WCSS/wcss_analysis.rds")
+
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 9, fig.width=15}
+
+
+wcss_analysis <-
+  readRDS("/home/nmkam1/Dissertation/WCSS/wcss_analysis.rds")
+
+
+
+wcss_analysis$census_variable <- factor(wcss_analysis$census_variable, levels = wcss_analysis$census_variable)
+
+# Plot
+wcss_plot <-
+  wcss_analysis %>% 
+  ggplot(aes(
+    x = wcss,
+    y = census_variable, 
+    group=1
+  )) +
+  geom_point(stat='summary', fun.x=sum) +
+  stat_summary(fun.x=sum, geom="line") +
+  coord_flip()+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+
+
+bcss_plot <-
+  wcss_analysis %>% 
+  ggplot(aes(
+    x = bcss,
+    y = census_variable, 
+    group=1
+  )) +
+  geom_point(stat='summary', fun.x=sum) +
+  stat_summary(fun.x=sum, geom="line") +
+  coord_flip()+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+
+wcss_plot
+
+bcss_plot
+
+#ggsave("wcss_plot.png", wcss_plot, units = "mm", width = 298, height = 210)
+
+```
+
+
+### Geographic Distribution
+
+#### 1991
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 25}
+
+var_maps <- c("0_to_14_children", "15_to_29_young_adults", "30_to_44_adults", "45_to_64_middle_aged", "65+_elderly_and_the_aged", "single_widowed_or_divorced", "married", "total_lone_parents", "households_with_no_dependent_children", "households_with_dependant_children", "white", "black", "indian", "pakistani", "bangladeshi", "chinese", "migrants_from_the_uk", "migrants_from_outside_the_uk", "uk_and_ireland", "europe", "africa", "caribbean", "bangladesh_india_and_pakistan", "china", "employed", "unemployed", "retired", "managerial_and_professional", "skilled_non_manual", "skilled_manual", "partly_skilled", "agricultural_forestry_and_fishing", "energy_and_water_supply", "mining_and_manufacturing", "construction", "distribution_hotels_and_catering_repairs", "transport_and_communications", "banking_and_finance_etc", "education_health_real_estate_defence_and_others", "first_or_higher_degree_professional_qualifications", "diploma_HNC_HND_etc", "total_students", "households_with_no_car", "households_with_2_or_more_cars", "use_public_transport", "use_private_car_or_trans", "use_non_motorized_trans",  "people_with_limiting_long_term_illness", "owned_accommodation", "private_rent", "social_rent", "detached_dwelling", "semi_detached_dwelling", "terraced_dwelling", "flats", "part_of_converted_or_shared_house", "shared_dwellings", "no_central_heating",  "households_with_7_or_more_rooms", "over_1_5_persons_per_room")
+
+
+var_list_91 <- list()
+
+
+for (x in var_maps) {
+  maps91 <- perc_var_1991 %>%
+    tm_shape() +
+    tm_fill(x, style = "jenks", breaks = 2) +
+    tm_layout(legend.height = 1, legend.width = 1, legend.title.size = 0.5, legend.text.size = 0.4,
+              legend.frame.lwd = 0.1, legend.position =c('left', 'bottom'))
+  var_list_91[[x]] <- maps91
+}
+  
+arranged_maps91 <- tmap_arrange(var_list_91, ncol = 6)
+
+
+tmap_save(arranged_maps91, filename = "map_distribution91.png" , units = "mm", width = 298, height = 210)
+
+
+```
+
+#### 2001
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 25}
+
+
+var_list_01 <- list()
+
+
+for (x in var_maps) {
+  maps01 <- perc_var_2001 %>%
+    tm_shape() +
+    tm_fill(x, style = "jenks", breaks = 2) +
+    tm_layout(legend.height = 1, legend.width = 1, legend.title.size = 0.5, legend.text.size = 0.4,
+              legend.frame.lwd = 0.1, legend.position =c('left', 'bottom'))
+  var_list_01[[x]] <- maps01
+}
+  
+arranged_maps01 <- tmap_arrange(var_list_01, ncol = 6)
+
+
+tmap_save(arranged_maps01, filename = "map_distribution01.png" , units = "mm", width = 298, height = 210)
+
+
+```
+
+#### 2011
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 25}
+
+
+var_list_11 <- list()
+
+
+for (x in var_maps) {
+  maps11 <- perc_var_2001 %>%
+    tm_shape() +
+    tm_fill(x, style = "jenks", breaks = 2) +
+    tm_layout(legend.height = 1, legend.width = 1, legend.title.size = 0.5, legend.text.size = 0.4,
+              legend.frame.lwd = 0.1, legend.position =c('left', 'bottom'))
+  var_list_11[[x]] <- maps11
+}
+  
+arranged_maps11 <- tmap_arrange(var_list_11, ncol = 6)
+
+
+tmap_save(arranged_maps11, filename = "map_distribution11.png" , units = "mm", width = 298, height = 210)
+
+
+```
+
+
+## Number of clusters
+In this part, the optimum number of clusters will be identified through three techniques: elbow method, silhouette plot and gap statistic.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+# Removing the variables that were excluded from the final variables list:
+data_for_testing <- stand_z_score %>%
+  dplyr::select(-c(code, year, single_widowed_or_divorced, households_with_no_dependent_children, households_with_dependant_children, white, uk_and_ireland, africa:employed, retired, agricultural_forestry_and_fishing:education_health_real_estate_defence_and_others, households_with_no_car, use_non_motorized_trans, owned_accommodation, shared_dwellings))
+
+
+# Calculate WCSS and silhouette
+# for k = 2 to 25
+# Set up two vectors where to store
+# the calculated WCSS and silhouette value
+set.seed(2011)
+testing_wcss <- rep(NA, 30)
+testing_silhouette <- rep(NA, 30)
+
+
+for(testing_k in 2:30){
+  # Calculate kmeans
+  kmeans_result <- 
+    stats::kmeans(data_for_testing, centers = testing_k, iter.max = 10000)
+  
+  # Extract WCSS
+  # and save it in the vector
+  testing_wcss[testing_k] <- kmeans_result %$% tot.withinss
+  
+  # Calculate average silhouette
+  # and save it in the vector
+  testing_silhouette[testing_k] <- 
+    kmeans_result %$% cluster %>%
+    cluster::silhouette(
+      data_for_testing %>% dist()
+    ) %>%
+    magrittr::extract(, 3) %>% mean()
+}
+
+
+# Calculate the gap statistic using bootstrapping
+testing_gap <- 
+  cluster::clusGap(
+    data_for_testing, 
+    FUN = kmeans, 
+    K.max = 30, # max number of clusters
+    B = 30      # number of samples
+  )
+
+
+
+```
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+# Plots
+plot(2:25, testing_wcss[2:25], type="b", xlab="Number of Clusters", 
+     ylab="WCSS", xlim=c(1,25)) +
+abline(v = 9, col = "red") +
+abline(v = 14, col = "red")
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+plot(2:25, testing_silhouette[2:25], type="b", xlab="Number of Clusters", 
+     ylab="Silhouette", xlim=c(1,25)) +
+abline(v = 9, col = "red") +
+abline(v = 14, col = "red")
+
+```
+
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+plot(2:25, testing_gap[["Tab"]][2:25, "gap"], type="b", xlab="Number of Clusters", 
+     ylab="Gap", xlim=c(1,25)) +
+abline(v = 9, col = "red") +
+abline(v = 14, col = "red")
+
+
+```
+
+
+## Computing the classification
+
+#---------------------------------------------10 clusters------------------------------------------------------
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+
+set.seed(2011)
+# Removing the variables that were excluded from the final variables list:
+data_for_clusters10 <- stand_z_score %>%
+  dplyr::select(-c(single_widowed_or_divorced, households_with_no_dependent_children, households_with_dependant_children, white, uk_and_ireland, africa:employed, retired, agricultural_forestry_and_fishing:education_health_real_estate_defence_and_others, households_with_no_car, use_non_motorized_trans, owned_accommodation, shared_dwellings))
+
+
+clusters_kmeans10 <- data_for_clusters10 %>%
+  dplyr::select("0_to_14_children":over_1_5_persons_per_room) %>%
+stats::kmeans(
+# 10 clusters is selected for k-means
+centers = 10,
+iter.max = 10000
+)
+# Adding the geodemographic clusters to the table
+data_for_clusters10 <-
+data_for_clusters10 %>%
+tibble::add_column(
+Geodemographic_cluster =
+clusters_kmeans10 %$%
+cluster %>%
+as.character()
+)
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+
+kmeans_data <- data_for_clusters10 %>%
+  dplyr::select("0_to_14_children":over_1_5_persons_per_room)
+
+
+KmClusters <- as.matrix(clusters_kmeans10$cluster)
+KmClusters <- as.data.frame(KmClusters)
+
+# Create a table of the cluster allocation
+table(KmClusters)
+# Extract OA percentage of each cluster
+prop.table(table(KmClusters))
+
+
+library(fpc)
+
+plotcluster(kmeans_data, data_for_clusters10$Geodemographic_cluster)
+
+```
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+Geodemographic_cluster_avgs10 <- data_for_clusters10 %>%
+group_by(Geodemographic_cluster) %>%
+dplyr::summarise(
+dplyr::across(
+"0_to_14_children":"over_1_5_persons_per_room",
+mean
+)
+)
+
+
+Geodemographic_cluster_avgs10 <- Geodemographic_cluster_avgs10 %>%
+  dplyr::mutate(Geodemographic_cluster = if_else(.$Geodemographic_cluster == 1, 'D2',
+                                if_else(.$Geodemographic_cluster == 2, 'F1',
+                                        if_else(.$Geodemographic_cluster == 3, 'B1',
+                                                if_else(.$Geodemographic_cluster == 4, 'F2',
+                                                        if_else(.$Geodemographic_cluster == 5, 'A1',
+                                                                if_else(.$Geodemographic_cluster == 6, 'E',
+                                                                        if_else(.$Geodemographic_cluster == 7, 'A2',
+                                                                                if_else(.$Geodemographic_cluster == 8, 'C',
+                                                                                        if_else(.$Geodemographic_cluster == 9, 'B2', 'D1'))))))))))
+
+
+heatmap_plot <- Geodemographic_cluster_avgs10 %>%
+tidyr::pivot_longer(
+cols = -Geodemographic_cluster,
+names_to = "clustering_dimension",
+values_to = "value"
+) %>%
+ggplot2::ggplot(
+aes(
+x = clustering_dimension %>%
+  factor(levels = c("0_to_14_children" ,"15_to_29_young_adults","30_to_44_adults","45_to_64_middle_aged","65+_elderly_and_the_aged","married","total_lone_parents","black","indian","pakistani","bangladeshi","chinese","migrants_from_the_uk","migrants_from_outside_the_uk","europe","unemployed","managerial_and_professional","skilled_non_manual","skilled_manual","partly_skilled","first_or_higher_degree_professional_qualifications","diploma_HNC_HND_etc","total_students","households_with_2_or_more_cars","use_public_transport","use_private_car_or_trans","people_with_limiting_long_term_illness","private_rent","social_rent","detached_dwelling","semi_detached_dwelling","terraced_dwelling","flats","part_of_converted_or_shared_house","no_central_heating","households_with_7_or_more_rooms","over_1_5_persons_per_room"), ordered = T
+         ),
+y = Geodemographic_cluster %>%
+  factor(levels = c("A1","A2","B1","B2","C","D1","D2","E","F1","F2"))
+)
+) +
+ggplot2::geom_tile(
+aes(
+fill = value
+)
+) +
+ggplot2::xlab("Clustering Dimension") +
+ggplot2::ylab("Cluster") +
+ggplot2::scale_fill_viridis_c(option = "inferno") +
+ggplot2::theme_bw() +
+ggplot2::theme(
+axis.text.x =
+element_text(
+angle = 90,
+vjust = 0.5,
+hjust = 1
+)
+)
+
+
+ggsave(
+  "heatmap_plot.png", 
+  heatmap_plot,
+  units = "mm",
+  width = 298,
+  height = 210
+  )
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width=20}
+
+# The chart is from the radarchart of the fmsb library
+library(fmsb)
+
+
+Geodemographic_cluster_avgs <- data_for_clusters10 %>%
+group_by(Geodemographic_cluster) %>%
+dplyr::summarise(
+dplyr::across(
+"0_to_14_children":"over_1_5_persons_per_room",
+mean
+)
+)
+
+
+#specifying the numerical vector
+par(mar = rep(1,4))
+par(mfrow = c(5,2))
+# Looping the process for the 8 clusters
+for(cluster_number in 1:10){
+rbind(
+# The radar chart requires a maximum and a minimum row
+# before the actual data
+rep(3, 37), # max 1 for 11 variables
+rep(-2.5, 37), # min 0 for 11 variables
+Geodemographic_cluster_avgs %>%
+dplyr::filter(Geodemographic_cluster == cluster_number) %>%
+dplyr::select(-Geodemographic_cluster) %>%
+as.data.frame()
+) %>%
+fmsb::radarchart(title = paste("Cluster", cluster_number), seg = 5, vlcex = 0.8, )
+}
+
+
+
+
+```
+
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+
+
+cluster_label <- c("A1","A2","B1","B2","C","D1","D2","E","F1","F2")
+
+radar_list <- list()
+
+for(cluster_number in cluster_label){
+  
+  radars <- Geodemographic_cluster_avgs10 %>%
+  dplyr::filter(Geodemographic_cluster == cluster_number) %>%
+  dplyr::select(-Geodemographic_cluster)
+  
+  rad <- radial.plot(radars, labels = colnames(radars), boxed.radial = T, mar=c(2,3,2,3), show.radial.grid = TRUE, line.col = "blue", radlab = TRUE, rp.type = "p,s", label.prop = 0.9, main = paste("Cluster", cluster_number), point.col="red", radial.lim = c(-3,3), grid.bg = "#f5f5f5")
+  
+  radar_list[[cluster_number]] <- rad
+}
+
+
+
+```
+
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+library(cluster)
+
+
+data_for_silh <- data_for_clusters10 %>%
+  dplyr::select("0_to_14_children":over_1_5_persons_per_room)
+
+sil <- silhouette(clusters_kmeans10$cluster, dist(data_for_silh))
+
+
+library(factoextra)
+library(ggthemes)
+
+fviz_silhouette(sil) +
+  theme_minimal()
+
+fviz_cluster(clusters_kmeans10, data_for_silh , ellipse.type = "norm") +
+theme_minimal()
+
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width=20}
+
+
+distance <- get_dist(data_for_silh)
+
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width=20}
+
+
+squared_distance <- distance ^ 2
+
+fviz_dist(squared_distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+
+```
+
+### Distance 1991:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+
+
+data_for_dista_91 <- data_for_clusters10 %>%
+  dplyr::filter(year == "1991") %>%
+  dplyr::arrange("code")
+
+
+row.names(data_for_dista_91) <- data_for_dista_91$code
+
+data_for_dista_91 <- data_for_dista_91 %>%
+  dplyr::select("0_to_14_children":over_1_5_persons_per_room)
+
+
+distance_91 <- get_dist(data_for_dista_91)
+
+
+library(reshape2)
+
+carto_91 <- melt(as.matrix(distance_91), varnames = c("row", "col")) %>%
+  dplyr::group_by(row) %>%
+  dplyr::summarise(mean_value = mean(value))
+
+
+write.csv(carto_91, "/home/nmkam1/Dissertation/Data/Output/Cartogram/carto_91.csv")
+
+
+fviz_dist(distance_91, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), show_labels = T, order= F)
+
+
+```
+
+
+### Distance 2001:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+
+
+data_for_dista_01 <- data_for_clusters10 %>%
+  dplyr::filter(year == "2001") %>%
+  dplyr::arrange("code")
+
+
+row.names(data_for_dista_01) <- data_for_dista_01$code
+
+data_for_dista_01 <- data_for_dista_01 %>%
+  dplyr::select("0_to_14_children":over_1_5_persons_per_room)
+
+
+distance_01 <- get_dist(data_for_dista_01)
+
+
+carto_01 <- melt(as.matrix(distance_01), varnames = c("row", "col")) %>%
+  dplyr::group_by(row) %>%
+  dplyr::summarise(mean_value = mean(value))
+
+
+write.csv(carto_01, "/home/nmkam1/Dissertation/Data/Output/Cartogram/carto_01.csv")
+
+
+fviz_dist(distance_01, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), show_labels = T, order= F)
+
+
+```
+
+
+
+### Distance 2011:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 10, fig.width=10}
+
+
+data_for_dista_11 <- data_for_clusters10 %>%
+  dplyr::filter(year == "2011") %>%
+  dplyr::arrange("code")
+
+
+row.names(data_for_dista_11) <- data_for_dista_11$code
+
+data_for_dista_11 <- data_for_dista_11 %>%
+  dplyr::select("0_to_14_children":over_1_5_persons_per_room)
+
+
+distance_11 <- get_dist(data_for_dista_11)
+
+
+carto_11 <- melt(as.matrix(distance_11), varnames = c("row", "col")) %>%
+  dplyr::group_by(row) %>%
+  dplyr::summarise(mean_value = mean(value))
+
+
+write.csv(carto_11, "/home/nmkam1/Dissertation/Data/Output/Cartogram/carto_11.csv")
+
+
+fviz_dist(distance_11, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), show_labels = T, order= F)
+
+
+```
+
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 8, fig.width=8}
+
+print(clusters_kmeans10)
+
+```
+
+
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width=20}
+
+data_for_clusters10_1991 <- data_for_clusters10 %>%
+  dplyr::filter(year == "1991")
+
+
+clusters10_1991 <-
+sf::read_sf("/home/nmkam1/Dissertation/Data/2011/2011_Leic_Oably.shp") %>%
+# Join shapefile and the geodemographic clusters
+dplyr::left_join(
+data_for_clusters10_1991,
+by = c("code" = "code")
+)
+
+
+# Interactive map 
+mapview(clusters10_1991, zcol = "Geodemographic_cluster", col.regions = c('#a6cee3', '#1f78b4','#fb9a99','#e31a1c','#fdbf6f','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928'),
+        lwd = 0, saturation = 5)
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width=20}
+
+data_for_clusters10_2001 <- data_for_clusters10 %>%
+  dplyr::filter(year == "2001")
+
+
+clusters10_2001 <-
+sf::read_sf("/home/nmkam1/Dissertation/Data/2011/2011_Leic_Oably.shp") %>%
+# Join shapefile and the geodemographic clusters
+dplyr::left_join(
+data_for_clusters10_2001,
+by = c("code" = "code")
+)
+
+
+# Interactive map 
+mapview(clusters10_2001, zcol = "Geodemographic_cluster", col.regions = c('#a6cee3', '#1f78b4','#fb9a99','#e31a1c','#fdbf6f','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928'),
+        lwd = 0, saturation = 5)
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width=20}
+
+data_for_clusters10_2011 <- data_for_clusters10 %>%
+  dplyr::filter(year == "2011")
+
+
+clusters10_2011 <-
+sf::read_sf("/home/nmkam1/Dissertation/Data/2011/2011_Leic_Oably.shp") %>%
+# Join shapefile and the geodemographic clusters
+dplyr::left_join(
+data_for_clusters10_2011,
+by = c("code" = "code")
+)
+
+
+# Interactive map 
+mapview(clusters10_2011, zcol = "Geodemographic_cluster", col.regions = c('#a6cee3', '#1f78b4','#e31a1c','#fdbf6f','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928'),
+        lwd = 0, saturation = 5)
+
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, fig.height = 20, fig.width=20}
+
+clusters_all_10 <-
+sf::read_sf("/home/nmkam1/Dissertation/Data/2011/2011_Leic_Oably.shp") %>%
+# Join shapefile and the geodemographic clusters
+  dplyr::left_join(data_for_clusters10, by = c("code" = "code")) %>%
+  dplyr::select(c(code, year, Geodemographic_cluster))
+
+clusters_all_10 <- clusters_all_10 %>%
+  dplyr::mutate(class = if_else(.$Geodemographic_cluster == 1, 'D2',
+                                if_else(.$Geodemographic_cluster == 2, 'F1',
+                                        if_else(.$Geodemographic_cluster == 3, 'B1',
+                                                if_else(.$Geodemographic_cluster == 4, 'F2',
+                                                        if_else(.$Geodemographic_cluster == 5, 'A1',
+                                                                if_else(.$Geodemographic_cluster == 6, 'E',
+                                                                        if_else(.$Geodemographic_cluster == 7, 'A2',
+                                                                                if_else(.$Geodemographic_cluster == 8, 'B2',
+                                                                                        if_else(.$Geodemographic_cluster == 9, 'C', 'D1'))))))))))
+
+
+
+
+#A = Ageing population (1)
+#B1 = Working-class multicultural communities (2) A1
+#B2 = South-Asian Communities (11) A2
+#C1 = Aspirational White Suburbs (6) B1
+#C2 = Professional White Suburbs (12) B2
+#D = Aspirational Multicultural Suburbs (3) C
+#E1 = Working-class White Communities (4) D1
+#E2 = Hard-pressed Young Families (9) D2
+#F = Deprived Multicultural communities (5) E
+#G = Young Adults (8)
+#H1 = Students and professionals around campus (7) F1
+#H2 = City students (10) F2
+
+
+
+st_write(clusters_all_10, "/home/nmkam1/Dissertation/Modified_OA/Output/clusters_all_10.shp")
+
+
+clusters_all_10 %>%
+  dplyr::filter(year == "1991") %>%
+  st_write("/home/nmkam1/Dissertation/Modified_OA/Output/clusters_all_10_1991.shp")
+
+
+clusters_all_10 %>%
+  dplyr::filter(year == "2001") %>%
+  st_write("/home/nmkam1/Dissertation/Modified_OA/Output/clusters_all_10_2001.shp")
+
+clusters_all_10 %>%
+  dplyr::filter(year == "2011") %>%
+  st_write("/home/nmkam1/Dissertation/Modified_OA/Output/clusters_all_10_2011.shp")
+
+```
+
+
+
