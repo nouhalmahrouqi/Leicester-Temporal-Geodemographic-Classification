@@ -12,7 +12,7 @@ This GitHub page is designed to provide additional material and information for 
 
 2) The **final** census varibales used to create the classification (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/blob/main/Final%20Variables.pdf)
 
-3) The **Pen Portraits** to describe the clusters ()
+3) The **Pen Portraits** to describe the clusters (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/blob/main/Pen%20Portraits.pdf)
 
 4) The project also developed an **Interactive Map** of the classification Available at: https://nouhalmahrouqi.shinyapps.io/LTOAC/
 
