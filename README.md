@@ -10,8 +10,10 @@ This GitHub page is designed to provide additional material and information for 
 
 1) **R code** used to create the classification (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/tree/main/Clustering%20Process)
 
+2) The final census varibales used to create the classification ()
 
-2) **Interactive Map** of the classification (https://github.com/nouhalmahrouqi/Leicester-Temporal-Geodemographic-Classification/tree/main/Shiny_App)
-Available at: https://nouhalmahrouqi.shinyapps.io/LTOAC/
+3) The Pen Portraits to describe the clusters ()
+
+4) The project also developed an **Interactive Map** of the classification Available at: https://nouhalmahrouqi.shinyapps.io/LTOAC/
 
 
